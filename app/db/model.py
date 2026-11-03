@@ -16,7 +16,8 @@ class User(SQLModel, table=True):
     email: str = Field(unique=True, index=True, max_length=255)
     username: str = Field(max_length=50)
     hashed_password: str = Field(max_length=255)
-    is_active: bool = Field(default=True)
+    is_active: bool = Field(default=False, nullable=False)
+    email_verified: bool = Field(default=False, nullable=False)
     created_at: datetime = Field(
         sa_column=Column(
             DateTime(timezone=True),

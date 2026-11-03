@@ -8,6 +8,7 @@ from sqlmodel import SQLModel
 
 from alembic import context
 from app.config import get_settings
+from app.db import model  # noqa: F401
 
 settings = get_settings()
 database_url = settings.DATABASE_URL.get_secret_value()

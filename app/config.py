@@ -9,15 +9,25 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 class Settings(BaseSettings):
     DATABASE_URL: SecretStr
+    REDIS_URL: SecretStr
 
     ACCESS_TOKEN_EXPIRES_MINUTES: int
     JWT_SECRET_KEY: SecretStr
     JWT_ALGORITHM: str
 
     REFRESH_TOKEN_EXPIRES_DAYS: int
+    SESSION_ABSOLUTE_EXPIRES_DAYS: int = 30
+
+    SMTP_HOST: str = "mailpit"
+    SMTP_PORT: int = 1025
+    SMTP_FROM: str = "no-reply@auth.local"
+    PASSWORD_RESET_URL: str = "http://localhost:3000/reset-password"
+    EMAIL_VERIFICATION_URL: str = "http://localhost:3000/verify-email"
 
     model_config = SettingsConfigDict(
-        env_file=BASE_DIR / ".env", env_file_encoding="utf-8", extra="ignore"
+        env_file=BASE_DIR / ".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
     )
 
 

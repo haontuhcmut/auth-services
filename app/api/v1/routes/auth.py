@@ -1,7 +1,16 @@
+from datetime import UTC, datetime
 from typing import Annotated
 
 import jwt
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Cookie,
+    Depends,
+    HTTPException,
+    Response,
+    status,
+)
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -40,7 +49,6 @@ from app.core.sessions import (
 from app.db.model import User
 from app.schemas.auth import (
     ForgotPasswordRequest,
-    RefreshRequest,
     ResendVerificationRequest,
     ResetPasswordRequest,
     SessionRead,
@@ -55,6 +63,38 @@ from app.services.email import (
 )
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+
+
+def set_refresh_cookie(
+    response: Response,
+    refresh_token: str,
+    expires_at: datetime,
+) -> None:
+    max_age = max(
+        0,
+        int((expires_at - datetime.now(UTC)).total_seconds()),
+    )
+
+    response.set_cookie(
+        key=settings.REFRESH_COOKIE_NAME,
+        value=refresh_token,
+        max_age=max_age,
+        expires=expires_at,
+        httponly=True,
+        secure=settings.REFRESH_COOKIE_SECURE,
+        samesite=settings.REFRESH_COOKIE_SAMESITE,
+        path=settings.REFRESH_COOKIE_PATH,
+    )
+
+
+def clear_refresh_cookie(response: Response) -> None:
+    response.delete_cookie(
+        key=settings.REFRESH_COOKIE_NAME,
+        path=settings.REFRESH_COOKIE_PATH,
+        httponly=True,
+        secure=settings.REFRESH_COOKIE_SECURE,
+        samesite=settings.REFRESH_COOKIE_SAMESITE,
+    )
 
 
 def unauthorized(detail: str = "Invalid credentials") -> HTTPException:
@@ -195,6 +235,7 @@ async def resend_verification(
 
 @router.post("/login", response_model=TokenResponse)
 async def login(
+    response: Response,
     form: Annotated[OAuth2PasswordRequestForm, Depends()],
     db: DatabaseDep,
     redis: RedisDep,
@@ -243,9 +284,14 @@ async def login(
         session_id=auth_session.session_id,
     )
 
+    set_refresh_cookie(
+        response,
+        refresh_token,
+        refresh_expires_at,
+    )
+
     return TokenResponse(
         access_token=access_token,
-        refresh_token=refresh_token,
         expires_in=expires_in,
         refresh_expires_at=refresh_expires_at,
         session_id=auth_session.session_id,
@@ -254,12 +300,19 @@ async def login(
 
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh(
-    payload: RefreshRequest,
+    response: Response,
     db: DatabaseDep,
     redis: RedisDep,
+    refresh_token: Annotated[
+        str | None,
+        Cookie(alias=settings.REFRESH_COOKIE_NAME),
+    ] = None,
 ) -> TokenResponse:
+    if not refresh_token:
+        raise unauthorized("Refresh token is missing")
+
     try:
-        claims = decode_refresh_token(payload.refresh_token)
+        claims = decode_refresh_token(refresh_token)
     except jwt.InvalidTokenError as exc:
         raise unauthorized("Invalid or expired refresh token") from exc
 
@@ -287,7 +340,7 @@ async def refresh(
         redis=redis,
         user_id=user.id,
         session_id=auth_session.session_id,
-        old_token=payload.refresh_token,
+        old_token=refresh_token,
         new_token=new_refresh_token,
         new_expires_at=refresh_expires_at,
     )
@@ -303,9 +356,14 @@ async def refresh(
         session_id=auth_session.session_id,
     )
 
+    set_refresh_cookie(
+        response,
+        new_refresh_token,
+        refresh_expires_at,
+    )
+
     return TokenResponse(
         access_token=access_token,
-        refresh_token=new_refresh_token,
         expires_in=expires_in,
         refresh_expires_at=refresh_expires_at,
         session_id=auth_session.session_id,
@@ -314,20 +372,24 @@ async def refresh(
 
 @router.post("/logout")
 async def logout(
+    response: Response,
     auth_session: CurrentSession,
     redis: RedisDep,
 ) -> dict[str, str]:
     await revoke_session(redis, auth_session.session_id)
+    clear_refresh_cookie(response)
 
     return {"detail": "Logged out successfully"}
 
 
 @router.post("/logout-all")
 async def logout_all(
+    response: Response,
     user: CurrentUser,
     redis: RedisDep,
 ) -> dict[str, int | str]:
     revoked_count = await revoke_all_user_sessions(redis, user.id)
+    clear_refresh_cookie(response)
 
     return {
         "detail": "All sessions have been revoked",

@@ -16,6 +16,11 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str
 
     REFRESH_TOKEN_EXPIRES_DAYS: int
+
+    REFRESH_COOKIE_NAME: str = "refresh_token"
+    REFRESH_COOKIE_SECURE: bool = False
+    REFRESH_COOKIE_SAMESITE: str = "lax"
+    REFRESH_COOKIE_PATH: str = "/api/v1/auth"
     SESSION_ABSOLUTE_EXPIRES_DAYS: int = 30
 
     SMTP_HOST: str = "mailpit"
